@@ -151,6 +151,7 @@ head(xx$dat)
 
 }
 \references{
+\insertRef{Dahm2023}{misseddeaths}\cr\cr
 \insertRef{Gondos2009}{misseddeaths}
 }
 \seealso{
