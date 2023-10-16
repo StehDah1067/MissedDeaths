@@ -12,7 +12,7 @@ nofu_increaseMessage = function(xx){
      xx$Param$runTime$CondRelSurv_ne_Pop != 0)
       message(mm)
 }
-icd_agr_sex <- function(xx){
+icd_agr_sex <- function(xx){#xx = rr
   dat = data.table(xx$dat)
   icd = paste(dat[,sort(unique(icd))],collapse = ' ')
   sex <- paste(dat[,sort(unique(sex))],collapse = ' ')

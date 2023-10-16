@@ -65,17 +65,28 @@ the analysis period starts on 2015/01/01 and ends on 2016/12/31.}
  \code{regCoef})\cr
 
 \itemize{
-   \item{\code{dat}:\cr \code{data.frame} with the input data and four}
+   \item{\code{dat}:\cr \code{data.frame} with the input data and}
 additional columns:
  \itemize{
  \item{\code{fu.age}: Age at follow-up end in years}
  \item{\code{fu.time}: Follow-up time in years}
  \item{\code{missedDeath}: 0: not a missed deaths;
  1: a missed deaths}
- \item{\code{prob}: propability of beeing a
-    missed deaths estimated by the logistic regression.
-    If the scoring algorithm is appield \code{prob} is
-    set to \code{NA}}
+ \item{\code{prob}: Probability for a missed death,
+    estimated with logistic regression.
+    If the scoring algorithm was applied or the
+    relative survival estimate did not increase at
+     follow-up end, \code{prob} is set to \code{NA}.
+     }
+     \item{\code{Meth}: Indicate the classification algorithm used
+     'logReg': logistic Regession, 'Sorcing': Scoring algorithmus,
+     'none': no classification had take place (relative survival
+     estimate did not increase at follow-up end). }
+     \item{\code{fm_imp}: imputed month of follow-up end}
+     \item{\code{fy_imp}: imputed year of follow-up end}
+     \item{\code{death_imp}: imputed death indictor (0: alife, 1: dead)}
+     \item{\code{fu.age_imp}:imputed age at follow-up end}
+     \item{\code{fu.time_imp}: imputed follow-up time}
  }
    \item{\code{survTab}:\cr \code{data.frame}
    contaning estimates of relative survival before
@@ -126,7 +137,7 @@ in the respective population or from the literature) should
 be included.
 
 Within \code{classify}, relative survival is estimated by the
-period approach (Gondos A, Brenner H, Holleczek B (2009)).Per
+period approach (Gondos A, Brenner H, Holleczek B (2009)). Per
 default we chose the last 5 years before follow-up end
 \code{fu_end} as the analysis period. The width of the
 analysis period can be changed by the parameter
@@ -138,6 +149,18 @@ Whenever 1-year conditional relative survival is between 95\%
 and 103\% in all follow-up years, we assume that survial in the
 patient group is similar to survival in the general population.
 In this case the search for missed deaths is not carried out.
+
+For patient data classified as missed deaths, survival time is
+imputed. For this we selected from the patient data a cohort with
+the same sex, age group, year of diagnosis, diagnosis and tumor
+stage as the missed death in question. Median survival
+was estimated by the Kaplan-Meier approach (survfit within
+the survival package (Therneau 2020)), using only the data
+ of cohort members dying within follow-up time (\code fu_end).
+ This median survival was imputed as survival time of the missed
+ death. When the estimate of survival time was based on data
+ from less than 20 individuals, data from patients in adjacent
+ diagnosis years were also included in the cohort.
 }
 \examples{
 data(C61)
@@ -152,7 +175,8 @@ head(xx$dat)
 }
 \references{
 \insertRef{Dahm2023}{misseddeaths}\cr\cr
-\insertRef{Gondos2009}{misseddeaths}
+ \insertRef{Gondos2009}{misseddeaths}\cr\cr
+ \insertRef{Therneau2020}{misseddeaths}\cr
 }
 \seealso{
 \code{\link{classify.parameter}}

@@ -116,25 +116,15 @@ rsSpline <- function(tb) { # tb = tb[,.(years,rs)]
   #  plotSpline(tb[,.(years,rs)])
   return(list(d012 = d012, sp1 = sp1, mins = mins, maxs = maxs)) # ,Extrema=extrema))
 }
-#
-# ddI.logRegPredict <- function(alive, am, opt) { # 	am=m2
-#   alive$prob <- predict(am, alive, type = "response")
-#   alive$zoutl <- ifelse(alive$prob > opt$pCut, 1, 0)
-#   return(alive)
-# }
 
 ddI.predict <- function(dp, z1, opt, sp, rs_0) {
-  prob <- zoutl <- death <- NULL
+  z1$zoutl <- 0
+  z1$prob <- 0
   dead <- z1[death == 1]
-  dead[, zoutl := 0]
-  dead[, prob := 0]
   alive <- z1[death == 0]
   if (!is.null(dp$m1)) {
-    alive$prob <- stats::predict.glm(dp$m1, newdata = alive, type = "response")
+    alive$prob <- predict(dp$m1, newdata = alive, type = "response")
     alive$zoutl <- ifelse(alive$prob > opt$pCut, 1, 0)
-  } else {
-    alive[, zoutl := 0]
-    alive[, prob := 0]
   }
   dp$data <- rbind(alive, dead)
   zz <- subset(dp$data, zoutl == 0)
@@ -155,9 +145,9 @@ scoreFuAgeSurvy <- function(dp, z1, rs_0, sp, opt) {
     bb$nr <- c(1:nrow(bb))
     return(bb)
   }
-  zoutl <- prob <- death <- fu.time <- fu.age <- NULL
-  dp$data[, zoutl := 0]
-  dp$data[, prob := NA]
+#  zoutl <- prob <- death <- fu.time <- fu.age <- NULL
+  dp$data$zoutl <- 0
+  dp$data$prob <- NA
   dp$tab <- rs_0
   alive <- data.table(subset(dp$data, death == 0))
   deaths <- data.table(subset(dp$data, death == 1))
@@ -189,7 +179,6 @@ PercentMissedDeath <- function(dp) {
 }
 
 myRelSurv <- function(z1, opt, sp) {
-#  z1[, vitstat := death + 1]
   z1[,':=' (vitstat = z1$death+1)]
   rs_0 <- periodR::period(data.frame(z1),
                           k = opt$survYears,
@@ -285,7 +274,7 @@ iterateMissedDeaths <- function(dp, rs_0, z1, deaths, sp, opt) {
     }
   }
   dp$quant <- dp$quant - (q1 - delta)
-  dp$reg_sig = regCoefSigni(dp$m1)
+  dp$reg_sig <- regCoefSigni(dp$m1)
   #  showCut(dp)
   #  dp$data[death==1,.N,zoutl]
   return(dp)
@@ -306,19 +295,18 @@ regCoefSigni <- function(m1){#m1 =dp$m1
 }
 
 tabValues = function(dp,z1,rs_0){
-  dp$tab[, icd := paste(sort(unique(z1$icd)),collapse = ',')]
-  dp$tab[, sex:= paste(sort(unique(z1$sex)),collapse = ',')]
-  dp$tab[, agr := paste(sort(unique(z1$agr)),collapse = ',')]
-  dp$tab[, rs_before := xPrint(rs_0$rs)]
-  #  dp$tab[, rs_all := xPrint(rs_0$rs)]
-  dp$tab[, rs_before.se := xPrint(rs_0$se)]
-  dp$tab[, rs_after := xPrint(rs)]
-  dp$tab[, rs_after.se := xPrint(se)]
+  dp$tab$icd <- paste(sort(unique(z1$icd)),collapse = ',')
+  dp$tab$sex <- paste(sort(unique(z1$sex)),collapse = ',')
+  dp$tab$agr <- paste(sort(unique(z1$agr)),collapse = ',')
+  dp$tab$rs_before <- xPrint(rs_0$rs)
+  dp$tab$rs_before.se <- xPrint(rs_0$se)
+  dp$tab$rs_after <- xPrint(dp$tab$rs)
+  dp$tab$rs_after.se <- xPrint(dp$tab$se)
   dp$tab <- dp$tab[, .(icd,sex,agr,stage, years, rs_before, rs_before.se, rs_after, rs_after.se)]
   return(dp)
 }
 
-#z1=dat[stage=='I'];
+#z1=dat[stage=='IV'];
 dedectImmortals <- function(z1, opt, sp){#z1 = dat
   rs <- se <- rs_all <- rs_all.se <- NULL
   years <-  NULL
@@ -352,12 +340,73 @@ dedectImmortals <- function(z1, opt, sp){#z1 = dat
   return(dp)
 }
 
-result <- function(dp,opt){#dp = xx$dp
+impFutime <- function(dd,opt){#dd=dp$data
+  selectCohort <- function(dd,Dy){ #Dy <- 1978
+    dxx <- dd[dy == Dy & death == 1]
+    firsty <-  dd[,min(dy)];
+    lasty <- dd[,max(dy)]
+    yu <- max(firsty,Dy-1)
+    yo <- min(lasty,Dy+1)
+    allYears = F
+    while(dxx[,.N] < 20  & !allYears){
+      yu <- max(firsty,yu-1)
+      yo <- min(lasty,yo+1)
+      if(yu==firsty & yo == lasty)
+        allYears <- T
+      dxx <- dd[dy %in% c(yu:yo) & death == 1]
+    }
+    if(dxx[,.N] < 20  & allYears){
+      cWarn <- paste("Cohort size for imputations of survival times for missed deaths < 20, dy =",Dy)
+      withCallingHandlers({ warning(cWarn);},# 1+2 },
+                          warning = function(w) { print(cWarn)}
+      )
+    }
+    return(dxx)
+  }
+  SurvProp <- function(dd,Dy){#Dy==1989
+    df <- selectCohort(dd,Dy)
+    survDat <- survival::Surv(df$fu.time, df$death)
+    fitA <- survival::survfit(survDat ~ 1)
+    fit <- summary(fitA)
+    uu <- as.numeric(fit$table['median'])
+    return(uu)
+  }
+  setDates <- function(d1){#d1 =d1[id=='010013748338']
+    diagdate = d1[,as.Date(paste(dy,dm,"15",sep="-"))]
+    fd <- d1[,as.Date(paste(dy,dm,"15",sep="-"))+fu.time_imp*365.25]
+    fuend <-  as.Date(paste0(opt$lastYear,'-12-31'))
+    fd_imp  <- as.Date(ifelse(fd > fuend,fuend,fd))
+    fu.time2 = ifelse(fd > fuend,as.numeric(fd_imp-diagdate)/365.25,d1$fu.time_imp)
+    d1[,fu.time_imp := fu.time2]
+    d1[,fm_imp := as.integer(substring(fd_imp,6,7))]
+    d1[,fu.age_imp := diagage+fu.time_imp]
+    d1[,fy_imp := as.integer(substring(fd_imp,1,4))]
+    d1[,death_imp := 1] #tod
+    return(d1[])
+  }
+  dd[,fm_imp := fm]
+  dd[,fy_imp := fy]
+  dd[,fu.age_imp := fu.age]
+  dd[,death_imp := death]
+  dd[,fu.time_imp := fu.time]
+  d1 <- dd[zoutl==1]
+  if(nrow(d1)==0) return(dd)
+  for(Dy in d1[,unique(dy)]){#Dy=2020
+    ix <- which(d1$dy == Dy)
+    d1[ix,'fu.time_imp'] <- SurvProp(dd,Dy)
+  }
+  d1 <- setDates(d1)
+  d0 <- dd[zoutl==0]
+  d2 <- rbind(d0,d1)
+  return(d2)
+}
+
+result <- function(dp,opt){
   getAnalysisParam <- function(d0){#d0 = dp[[1]]
     data.table(
-      agr = unique(d0$data$agr),
+      agr = paste(sort(unique(d0$data$agr)),collapse = ' '),
       sex = unique(d0$data$sex),
-      stage = d0$stage,
+      stage = paste(sort(unique(d0$stage)),collapse = ' '),
       CondRelSurv_ne_Pop = d0$CondRelSurv_ne_Pop,
       reg_sig = d0$reg_sig,
       p_reg_md = d0$p_reg_md,
@@ -374,49 +423,54 @@ result <- function(dp,opt){#dp = xx$dp
       mod = summary(dp$m1)
       if(regCoefSigni(dp$m1)) si = 1 else si = 0
       rc <- as.data.table(mod$coefficients)[,c(1,2,4)]
-      rc[,varnames := row.names(mod$coefficients)]
-      rc[,signi := si]
+      rc$varnames <- row.names(mod$coefficients)
+      rc$signi <- si
     } else{
       rc = data.table(Estimate=0, 'Std. Error'=0,
                  'Pr(>|z|)'=1)
-      rc[,varnames := 'NULL']
-      rc[,signi := -1]
+      rc$varnames <- 'NULL'
+      rc$signi <- -1
     }
-    rc[,stage := unique(dp$data$stage)]
-    rc[,agr := unique(dd$agr)]
-    rc[,sex := unique(dd$sex)]
+    rc$stage <- paste(sort(unique(dp$data$stage)),collapse = " ")
+    rc$agr <- paste(sort(unique(dd$agr)),collapse = ' ')
+    rc$agr <- paste(as.character(unique(dd$agr)),collapse = ", ")
+    rc$sex <- unique(dd$sex)
     rc <- rc[,c('sex','agr','stage','varnames',
           'Estimate','Std. Error','Pr(>|z|)')]#,'signi')]
     return(rc)
   }
+  wrMeth = function(dp,dd){
+    dd[,Meth := ifelse(dp$reg_sig == 1,'logReg','None')]
+    dd[,Meth := ifelse(dp$scoring == 1,'scoring',Meth)]
+    return(dd)
+  }
   dd <- dp$data;
+  dd <- wrMeth(dp,dd)
   oo <- getAnalysisParam(dp)
   tab <- data.frame(dp$tab)
   regCoef <- getRegCoef(dp,dd)
-  dd[,vitstat := NULL]
+  dd$vitstat <- NULL
   setnames(dd,'zoutl','missedDeath')
-  dd[,death := ifelse(missedDeath == 1,1,death)]
   opt$quant <-NULL;opt$pCut <- NULL
   Param <- list( opt = opt, runTime=oo)
-  dd = data.frame(dd)
+  dd = data.frame(dd[,.(id,sex,icd,stage,diagage,agr,dm,dy,fm,fy,
+                        death,fu.time,fu.age,missedDeath,prob,Meth,
+                        fm_imp,fy_imp,death_imp,fu.age_imp,fu.time_imp)])
 #  print(Param)
   return(list(dat=dd,survTab = tab,Param=Param,regCoef=regCoef))
 }
 
-
-exitTime <- function(t1,opt){#t1 = z0
+exitTime <- function(t1,opt){#t1 = dat#alive[id == '010010103952']
   Ende  <- as.Date(paste(opt$lastYear,12,31,sep='-'))
-  t1[,fd := as.Date(paste(fy,fm,'15',sep='-'))]
-#  t1[,fd := ifelse(fd > as.Date(paste(opt$lastYear,12,15,sep='-')),Ende,fd)]
-  t1[death == 0,fd := ifelse(fd >= as.Date(paste(opt$lastYear,12,15,sep='-')),Ende,fd)]
-  t1[death == 1,fd := ifelse(fd > as.Date(paste(opt$lastYear,12,15,sep='-')),Ende,fd)]
-  t1[,dd := as.Date(paste(dy,dm,'15',sep='-'))]
+  t1$fd <- as.Date(paste(t1$fy,t1$fm,'15',sep='-')) #death date == diagnose date => 15 days survival
+  t1$fd <- ifelse(t1$fd > Ende,Ende,t1$fd)
+  t1$dd <- as.Date(paste(t1$dy,t1$dm,'15',sep='-'))
   t1$fd <- ifelse(t1$fd == t1$dd,t1$fd+15,t1$fd)
-  t1$death <- ifelse(t1$fd >= Ende,0,t1$death)
-  #t1$vitstat1 <- t1$death+1
+#  t1$death <- ifelse(t1$fd >= Ende,0,t1$death)
+  t1$fd <- ifelse(t1$death == 0,Ende,t1$fd)
   class(t1$fd) <- "Date"
-  t1[,fu.time := as.numeric(fd - dd)/365.24]
-  t1[,fu.age := diagage + fu.time]
+  t1$fu.time <- as.numeric(t1$fd - t1$dd)/365.24
+  t1$fu.age <- t1$diagage + t1$fu.time
   return(t1[])
 }
 showMessages = function(dat){
@@ -425,9 +479,14 @@ showMessages = function(dat){
     tryCatch(stop(e)#,  finally = print("")
         )
   }
-
+  if(dat[,.N,sex][,.N] > 1){
+    e <- simpleError("Stratification of the data by unique sex is required!")
+    tryCatch(stop(e)#,  finally = print("")
+        )
+  }
+  dat[,.N,sex][,.N]
   if(nrow(dat) < 500)
-    withCallingHandlers({ warning("Too small stratum size"); 1+2 },
+    withCallingHandlers({ warning("Too small stratum size");},
         warning = function(w) {
           print(paste('Too small stratum size! N =',nrow(dat)))
         }
@@ -471,7 +530,7 @@ showMessages = function(dat){
 #' be included.
 #'
 #' Within \code{classify}, relative survival is estimated by the
-#' period approach (Gondos A, Brenner H, Holleczek B (2009)).Per
+#' period approach (Gondos A, Brenner H, Holleczek B (2009)). Per
 #' default we chose the last 5 years before follow-up end
 #' \code{fu_end} as the analysis period. The width of the
 #' analysis period can be changed by the parameter
@@ -484,6 +543,17 @@ showMessages = function(dat){
 #' patient group is similar to survival in the general population.
 #' In this case the search for missed deaths is not carried out.
 #'
+#' For patient data classified as missed deaths, survival time is
+#' imputed. For this we selected from the patient data a cohort with
+#' the same sex, age group, year of diagnosis, diagnosis and tumor
+#' stage as the missed death in question. Median survival
+#' was estimated by the Kaplan-Meier approach (survfit within
+#' the survival package (Therneau 2020)), using only the data
+#'  of cohort members dying within follow-up time (\code fu_end).
+#'  This median survival was imputed as survival time of the missed
+#'  death. When the estimate of survival time was based on data
+#'  from less than 20 individuals, data from patients in adjacent
+#'  diagnosis years were also included in the cohort.
 #'
 #' @param dat \code{data.frame} consisting of 11 variables:\cr
 #'  \code{id} - (int) unique identifier for each data line,\cr
@@ -543,17 +613,28 @@ showMessages = function(dat){
 
 #'
 #' \itemize{
-#'    \item{\code{dat}:\cr \code{data.frame} with the input data and four}
+#'    \item{\code{dat}:\cr \code{data.frame} with the input data and}
 #' additional columns:
 #'  \itemize{
 #'  \item{\code{fu.age}: Age at follow-up end in years}
 #'  \item{\code{fu.time}: Follow-up time in years}
 #'  \item{\code{missedDeath}: 0: not a missed deaths;
 #'  1: a missed deaths}
-#'  \item{\code{prob}: propability of beeing a
-#'     missed deaths estimated by the logistic regression.
-#'     If the scoring algorithm is appield \code{prob} is
-#'     set to \code{NA}}
+#'  \item{\code{prob}: Probability for a missed death,
+#'     estimated with logistic regression.
+#'     If the scoring algorithm was applied or the
+#'     relative survival estimate did not increase at
+#'      follow-up end, \code{prob} is set to \code{NA}.
+#'      }
+#'      \item{\code{Meth}: Indicate the classification algorithm used
+#'      'logReg': logistic Regession, 'Sorcing': Scoring algorithmus,
+#'      'none': no classification had take place (relative survival
+#'      estimate did not increase at follow-up end). }
+#'      \item{\code{fm_imp}: imputed month of follow-up end}
+#'      \item{\code{fy_imp}: imputed year of follow-up end}
+#'      \item{\code{death_imp}: imputed death indictor (0: alife, 1: dead)}
+#'      \item{\code{fu.age_imp}:imputed age at follow-up end}
+#'      \item{\code{fu.time_imp}: imputed follow-up time}
 #'  }
 #'    \item{\code{survTab}:\cr \code{data.frame}
 #'    contaning estimates of relative survival before
@@ -585,7 +666,9 @@ showMessages = function(dat){
 #' head(xx$dat)
 #'
 #' @references
-#'  \insertRef{Gondos2009}{misseddeaths}
+#'  \insertRef{Dahm2023}{misseddeaths}\cr\cr
+#'  \insertRef{Gondos2009}{misseddeaths}\cr\cr
+#'  \insertRef{Therneau2020}{misseddeaths}\cr
 #'
 #'@seealso
 #'  \code{\link{classify.parameter}}
@@ -595,7 +678,7 @@ showMessages = function(dat){
 #'
 
 classify <- function(dat,sp,fu_end,survYears,
-                     md_cutoff=3.0,periodWidth=5) { # dat = z0;fu_end=2019;survYears=35;md_cutoff=3.0;periodWidth=5
+                     md_cutoff=3.0,periodWidth=5) { # dat = uu;fu_end=2020;survYears=35;md_cutoff=3.0;periodWidth=5
 #warning about minimum stratum size
   showMessages(dat)
   opt <- list(survYears=survYears,
@@ -608,7 +691,12 @@ classify <- function(dat,sp,fu_end,survYears,
   dat <- setDT(dat)
   dat <- exitTime(dat,opt)
   dp <- dedectImmortals(dat, opt, sp)
-  rr = result(dp,opt)
+  uu <- impFutime(dp$data,opt)
+  dp$data <- uu
+  rr <- result(dp,opt)
   print(classify.summary(rr))
   return(rr)
 }
+
+## error if sex is not unique
+
